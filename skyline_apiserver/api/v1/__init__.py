@@ -15,7 +15,6 @@
 from fastapi import APIRouter
 from skyline_apiserver.api.v1 import (
     contrib,
-    dev_monitoring,
     extension,
     instance_monitoring,
     login,
@@ -34,7 +33,6 @@ api_router.include_router(contrib.router, tags=["Contrib"])
 api_router.include_router(policy.router, tags=["Policy"])
 api_router.include_router(setting.router, tags=["Setting"])
 api_router.include_router(instance_monitoring.router, tags=["Instance Monitoring"])
-api_router.include_router(dev_monitoring.router, tags=["Development"])
 api_router.include_router(vm_ranking.router, tags=["VM Ranking"])
 api_router.include_router(instance_history.router, tags=["Instance History"])
 api_router.include_router(ai_agent.router, tags=["AI Agent"])
