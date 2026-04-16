@@ -1,4 +1,3 @@
-cat > ~/projects/skyline-apiserver/Dockerfile << 'EOF'
 FROM quay.io/openstack.kolla/skyline-apiserver:2024.2-ubuntu-noble
 USER root
 RUN mkdir -p /var/log/kolla/skyline /etc/skyline
