@@ -5,8 +5,6 @@ RUN python3 -m venv /opt/crewai-venv && \
     /opt/crewai-venv/bin/pip install crewai langchain-groq openstacksdk litellm --quiet
 COPY skyline_apiserver/api/v1/instance_monitoring.py \
      /var/lib/kolla/venv/lib/python3.12/site-packages/skyline_apiserver/api/v1/instance_monitoring.py
-COPY skyline_apiserver/api/v1/dev_monitoring.py \
-     /var/lib/kolla/venv/lib/python3.12/site-packages/skyline_apiserver/api/v1/dev_monitoring.py
 COPY skyline_apiserver/api/v1/__init__.py \
      /var/lib/kolla/venv/lib/python3.12/site-packages/skyline_apiserver/api/v1/__init__.py
 COPY skyline_apiserver/schemas/monitoring.py \
