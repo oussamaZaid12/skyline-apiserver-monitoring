@@ -1,3 +1,4 @@
+import os
 #!/opt/crewai-venv/bin/python
 # CrewAI runner — tourne dans le venv isolé /opt/crewai-venv
 import sys
