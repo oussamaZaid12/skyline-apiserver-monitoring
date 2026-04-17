@@ -37,7 +37,7 @@ jobs:
           sudo docker rm skyline_apiserver 2>/dev/null || true
           sudo docker run -d --name skyline_apiserver --network host \
             -e KOLLA_CONFIG_STRATEGY=COPY_ALWAYS \
-            -e GROQ_API_KEY=${{ secrets.GROQ_API_KEY }} \
+              --env-file /etc/kolla/skyline-apiserver/groq.env \
             -v /etc/kolla/skyline-apiserver/config.json:/var/lib/kolla/config_files/config.json \
             -v /etc/kolla/skyline-apiserver/skyline.yaml:/var/lib/kolla/config_files/skyline.yaml \
             -v /etc/kolla/skyline-apiserver/gunicorn.py:/var/lib/kolla/config_files/gunicorn.py \
