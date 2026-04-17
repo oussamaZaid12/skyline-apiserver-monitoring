@@ -5,21 +5,33 @@ import sys
 import json
 import yaml
 
+CURRENT_PROJECT_ID = None
+CURRENT_TOKEN = None
 
 def get_os_connection():
     import openstack
     with open("/etc/skyline/skyline.yaml") as f:
         cfg = yaml.safe_load(f)
     os_cfg = cfg["openstack"]
+    
+    if CURRENT_TOKEN:
+        return openstack.connect(
+            auth_type="token",
+            auth={
+                "auth_url": os_cfg["keystone_url"],
+                "token": CURRENT_TOKEN,
+                "project_id": CURRENT_PROJECT_ID,
+            },
+        )
+    # Fallback système
     return openstack.connect(
         auth_url=os_cfg["keystone_url"],
         username=os_cfg["system_user_name"],
         password=os_cfg["system_user_password"],
-        project_name=os_cfg["system_project"],
+        project_name="admin",
         user_domain_name=os_cfg["system_user_domain"],
         project_domain_name=os_cfg["system_project_domain"],
     )
-
 
 from crewai.tools import tool
 
@@ -29,7 +41,7 @@ def list_instances(query: str = "all") -> str:
     """Liste toutes les instances OpenStack avec statut et IP."""
     try:
         conn = get_os_connection()
-        servers = list(conn.compute.servers(all_projects=True))
+        servers = list(conn.compute.servers())
         if not servers:
             return "Aucune instance trouvée."
         result = []
@@ -159,14 +171,17 @@ def get_instance_metrics(name_or_id: str) -> str:
 
 
 def main():
+    global CURRENT_TOKEN, CURRENT_PROJECT_ID
     input_file  = sys.argv[1]
     output_file = sys.argv[2]
 
     with open(input_file) as f:
         payload = json.load(f)
 
-    message = payload.get("message", "")
-    history = payload.get("history", [])
+    message             = payload.get("message", "")
+    history             = payload.get("history", [])
+    CURRENT_TOKEN       = payload.get("keystone_token", "")
+    CURRENT_PROJECT_ID  = payload.get("project_id", "")
 
     GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 
@@ -182,19 +197,27 @@ def main():
         role="Assistant OpenStack",
         goal="Aider l'utilisateur à gérer son infrastructure OpenStack via langage naturel.",
         backstory=(
-            "You are an OpenStack expert assistant. "
-            "You MUST use the available tools to answer questions. "
-            "Always call tools directly without explaining what you will do. "
-            "IMPORTANT: When a user wants to CREATE an instance, NEVER create immediately. "
-            "First call list_flavors, list_images, list_networks, then ask the user to confirm "
-            "name, flavor, image, and network. Only create when all info is provided. "
-            "When a user wants to DELETE, always ask for confirmation first. "
-            "Respond in French after getting tool results."
+            "You are an OpenStack infrastructure assistant with access to live tools. "
+            "\n\nRULE 1 — ALWAYS USE TOOLS: Every response about instances, flavors, images, "
+            "networks, or metrics MUST start with a tool call. No exceptions. "
+            "\nRULE 2 — NEVER FABRICATE: You have NO knowledge of this infrastructure. "
+            "Instance names, IDs, IPs, statuses are UNKNOWN to you until a tool returns them. "
+            "If you respond without calling a tool first, you are hallucinating. "
+            "\nRULE 3 — TOOL ERRORS: If a tool returns an error, report the exact error message "
+            "in French. Never substitute invented data for a failed tool call. "
+            "\nRULE 4 — CREATE FLOW: Before creating an instance, call list_flavors, "
+            "list_images, and list_networks. Then ask the user to confirm name, flavor, "
+            "image, and network. Only call create_instance when all four are confirmed. "
+            "\nRULE 5 — DELETE FLOW: Before deleting, ask the user to confirm by name/ID. "
+            "\nRULE 6 — LANGUAGE: Always respond in French using only real tool output data."
         ),
         tools=[list_instances, list_flavors, list_images, list_networks,
                create_instance, delete_instance, get_instance_metrics],
         llm=llm,
-        verbose=False,
+        allow_delegation=False,
+        max_iter=5,
+        max_retry_limit=3,
+        verbose=True,
     )
 
     context = ""
@@ -208,7 +231,7 @@ def main():
         agent=agent,
     )
 
-    crew = Crew(agents=[agent], tasks=[task], verbose=False)
+    crew = Crew(agents=[agent], tasks=[task], verbose=True)
     result = crew.kickoff()
 
     with open(output_file, "w") as f:

@@ -74,12 +74,12 @@ async def get_instance_metrics(
     # Utilise domain_name (instance_name) pour les requêtes Prometheus
     domain_name = getattr(instance, 'OS-EXT-SRV-ATTR:instance_name', None) or instance.id  # ex: instance-00000005
 
-    cpu_resp        = await query_prometheus(f'rate(libvirt_domain_info_cpu_time_seconds_total{{domain="{domain_name}"}}[5m]) * 100', x_openstack_request_id)
+    cpu_resp        = await query_prometheus(f'rate(libvirt_domain_info_cpu_time_seconds_total{{domain="{domain_name}"}}[1m]) * 100', x_openstack_request_id)
     memory_resp     = await query_prometheus(f'libvirt_domain_info_memory_usage_bytes{{domain="{domain_name}"}}', x_openstack_request_id)
-    disk_read_resp  = await query_prometheus(f'rate(libvirt_domain_block_stats_read_bytes_total{{domain="{domain_name}"}}[5m])', x_openstack_request_id)
-    disk_write_resp = await query_prometheus(f'rate(libvirt_domain_block_stats_write_bytes_total{{domain="{domain_name}"}}[5m])', x_openstack_request_id)
-    net_rx_resp     = await query_prometheus(f'rate(libvirt_domain_interface_stats_receive_bytes_total{{domain="{domain_name}"}}[5m])', x_openstack_request_id)
-    net_tx_resp     = await query_prometheus(f'rate(libvirt_domain_interface_stats_transmit_bytes_total{{domain="{domain_name}"}}[5m])', x_openstack_request_id)
+    disk_read_resp  = await query_prometheus(f'rate(libvirt_domain_block_stats_read_bytes_total{{domain="{domain_name}"}}[1m])', x_openstack_request_id)
+    disk_write_resp = await query_prometheus(f'rate(libvirt_domain_block_stats_write_bytes_total{{domain="{domain_name}"}}[1m])', x_openstack_request_id)
+    net_rx_resp     = await query_prometheus(f'rate(libvirt_domain_interface_stats_receive_bytes_total{{domain="{domain_name}"}}[1m])', x_openstack_request_id)
+    net_tx_resp     = await query_prometheus(f'rate(libvirt_domain_interface_stats_transmit_bytes_total{{domain="{domain_name}"}}[1m])', x_openstack_request_id)
 
     memory_bytes = extract_prometheus_value(memory_resp)
     return schemas.InstanceMetricsResponse(
