@@ -20,6 +20,7 @@ from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
 
 from skyline_apiserver.api.v1 import api_router
+from skyline_apiserver.api.v1.alert_rules import evaluate_alerts
 from skyline_apiserver.config import CONF, configure
 from skyline_apiserver.db import setup as db_setup
 from skyline_apiserver.log import LOG, setup as log_setup
