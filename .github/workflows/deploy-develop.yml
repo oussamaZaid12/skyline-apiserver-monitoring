@@ -33,14 +33,16 @@ jobs:
         username: ${{ secrets.ALLINONE_USER }}
         key: ${{ secrets.ALLINONE_SSH_KEY }}
         script: |
+          sudo docker rmi skyline-apiserver-monitoring:develop 2>/dev/null || true
+          sudo docker image prune -f
           sudo docker load < /tmp/skyline-apiserver.tar.gz
           sudo docker stop skyline_apiserver_dev 2>/dev/null || true
           sudo docker rm skyline_apiserver_dev 2>/dev/null || true
           sudo docker run -d --name skyline_apiserver_dev \
-            -p 9997:9999 \
+            --network host \
             -e KOLLA_CONFIG_STRATEGY=COPY_ALWAYS \
             --env-file /etc/kolla/skyline-apiserver/groq.env \
             -v /etc/kolla/skyline-apiserver/config.json:/var/lib/kolla/config_files/config.json \
             -v /etc/kolla/skyline-apiserver/skyline.yaml:/var/lib/kolla/config_files/skyline.yaml \
-            -v /etc/kolla/skyline-apiserver/gunicorn.py:/var/lib/kolla/config_files/gunicorn.py \
+            -v /etc/kolla/skyline-apiserver/gunicorn-dev.py:/var/lib/kolla/config_files/gunicorn.py \
             skyline-apiserver-monitoring:develop kolla_start
