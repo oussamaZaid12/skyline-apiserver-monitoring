@@ -13,7 +13,7 @@
 # limitations under the License.
 
 from __future__ import annotations
-
+import asyncio
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -48,7 +48,7 @@ async def on_startup() -> None:
             allow_headers=["*"],
         )
     LOG.debug("Skyline API server start")
-
+    asyncio.create_task(evaluate_alerts())
 
 async def on_shutdown() -> None:
     LOG.debug("Skyline API server stop")

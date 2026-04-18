@@ -24,6 +24,7 @@ from skyline_apiserver.api.v1 import (
     vm_ranking,
     instance_history,
     ai_agent,
+    alert_rules,
 )
 api_router = APIRouter()
 api_router.include_router(login.router, tags=["Login"])
@@ -36,3 +37,4 @@ api_router.include_router(instance_monitoring.router, tags=["Instance Monitoring
 api_router.include_router(vm_ranking.router, tags=["VM Ranking"])
 api_router.include_router(instance_history.router, tags=["Instance History"])
 api_router.include_router(ai_agent.router, tags=["AI Agent"])
+api_router.include_router(alert_rules.router, tags=["Alerts"])
