@@ -37,7 +37,7 @@ jobs:
           sudo docker stop skyline_apiserver_dev 2>/dev/null || true
           sudo docker rm skyline_apiserver_dev 2>/dev/null || true
           sudo docker run -d --name skyline_apiserver_dev \
-            -p 9997:9999 \        # ← hôte:9997 → conteneur:9999
+            -p 9997:9999 \
             -e KOLLA_CONFIG_STRATEGY=COPY_ALWAYS \
             --env-file /etc/kolla/skyline-apiserver/groq.env \
             -v /etc/kolla/skyline-apiserver/config.json:/var/lib/kolla/config_files/config.json \
