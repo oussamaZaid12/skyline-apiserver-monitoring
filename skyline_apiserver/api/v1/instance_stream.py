@@ -1,4 +1,5 @@
-"""SSE endpoint for real-time instance metrics using sse-starlette.
+"""SSE endpoint for real-time instance metrics — custom EventSourceResponse.
+Avoids dependency on sse-starlette which breaks starlette version constraint.
 Author: Oussama Zaied - ESPRIT
 """
 from __future__ import annotations
@@ -10,7 +11,8 @@ import time
 import httpx
 from fastapi import Depends
 from fastapi.routing import APIRouter
-from sse_starlette.sse import EventSourceResponse
+from starlette.responses import Response
+from starlette.types import Send
 from loguru import logger as LOG
 from starlette.concurrency import run_in_threadpool
 
@@ -33,6 +35,53 @@ METRIC_QUERIES = {
 }
 
 PUSH_INTERVAL = 5
+
+
+class SSEResponse(Response):
+    media_type = "text/event-stream"
+
+    def __init__(self, generator):
+        self.generator = generator
+        super().__init__(
+            content=None,
+            status_code=200,
+            media_type=self.media_type,
+        )
+        self.headers["Cache-Control"] = "no-cache"
+        self.headers["Connection"] = "keep-alive"
+        self.headers["X-Accel-Buffering"] = "no"
+
+    async def __call__(self, scope, receive, send: Send):
+        await send({
+            "type": "http.response.start",
+            "status": self.status_code,
+            "headers": self.raw_headers,
+        })
+        try:
+            async for chunk in self.generator:
+                if isinstance(chunk, dict):
+                    lines = []
+                    if "event" in chunk:
+                        lines.append(f"event: {chunk['event']}")
+                    if "data" in chunk:
+                        lines.append(f"data: {chunk['data']}")
+                    message = "\n".join(lines) + "\n\n"
+                else:
+                    message = str(chunk)
+                await send({
+                    "type": "http.response.body",
+                    "body": message.encode("utf-8"),
+                    "more_body": True,
+                })
+        except asyncio.CancelledError:
+            LOG.info("[SSE] Client disconnected")
+            raise
+        finally:
+            await send({
+                "type": "http.response.body",
+                "body": b"",
+                "more_body": False,
+            })
 
 
 async def _query_one(client: httpx.AsyncClient, query: str, auth) -> float:
@@ -60,7 +109,7 @@ async def stream_instance_metrics(
     instance_id: str,
     profile: schemas.Profile = Depends(deps.get_profile_update_jwt),
 ):
-    """Stream live metrics via SSE. Uses sse-starlette to avoid Python 3.12 issues."""
+    """Stream live metrics via SSE."""
     LOG.info(f"[Stream] Request for instance_id={instance_id}")
 
     try:
@@ -91,7 +140,6 @@ async def stream_instance_metrics(
                     results = await asyncio.gather(*[
                         _query_one(client, q, auth) for q in queries
                     ])
-
                     payload = {
                         "timestamp":       int(time.time()),
                         "cpu_percent":     round(results[0], 2),
@@ -102,7 +150,6 @@ async def stream_instance_metrics(
                         "network_tx_kbps": round(results[5] / 1024, 2),
                         "vcpus":           int(results[6]) if results[6] else 1,
                     }
-
                     yield {"data": json.dumps(payload)}
                     await asyncio.sleep(PUSH_INTERVAL)
 
@@ -114,4 +161,4 @@ async def stream_instance_metrics(
                     yield {"event": "error", "data": json.dumps({"error": str(exc)})}
                     await asyncio.sleep(PUSH_INTERVAL)
 
-    return EventSourceResponse(event_generator())
+    return SSEResponse(event_generator())
