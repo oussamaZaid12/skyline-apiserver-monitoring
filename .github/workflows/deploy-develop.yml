@@ -34,7 +34,6 @@ jobs:
         key: ${{ secrets.ALLINONE_SSH_KEY }}
         script: |
           sudo docker rmi skyline-apiserver-monitoring:develop 2>/dev/null || true
-          sudo docker image prune -f
           sudo docker load < /tmp/skyline-apiserver.tar.gz
           sudo docker stop skyline_apiserver_dev 2>/dev/null || true
           sudo docker rm skyline_apiserver_dev 2>/dev/null || true

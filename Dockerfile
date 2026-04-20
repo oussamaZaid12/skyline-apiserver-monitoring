@@ -17,6 +17,8 @@ COPY skyline_apiserver/api/v1/instance_history.py \
      /var/lib/kolla/venv/lib/python3.12/site-packages/skyline_apiserver/api/v1/instance_history.py
 COPY skyline_apiserver/api/v1/ai_agent.py \
      /var/lib/kolla/venv/lib/python3.12/site-packages/skyline_apiserver/api/v1/ai_agent.py
+     COPY skyline_apiserver/api/v1/instance_stream.py \
+     /var/lib/kolla/venv/lib/python3.12/site-packages/skyline_apiserver/api/v1/instance_stream.py
 COPY crewai_runner.py /opt/crewai_runner.py
 RUN chmod +x /opt/crewai_runner.py
 COPY skyline_apiserver/api/v1/alert_rules.py \
