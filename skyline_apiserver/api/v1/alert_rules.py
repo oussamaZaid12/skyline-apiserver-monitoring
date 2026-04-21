@@ -12,11 +12,14 @@ from pydantic import BaseModel
 from skyline_apiserver import schemas
 from skyline_apiserver.api import deps
 from skyline_apiserver.client import utils as client_utils
+from skyline_apiserver.client.utils import generate_session, nova_client
 from skyline_apiserver.config import CONF
 from skyline_apiserver.db import alerts_db
 from skyline_apiserver.log import LOG
+from starlette.concurrency import run_in_threadpool
 import yaml
 import os
+
 router = APIRouter()
 
 # ─── Schemas ─────────────────────────────────────────────────────────────────
@@ -35,8 +38,14 @@ class AlertRuleCreate(BaseModel):
     notify_webhook: bool = False
     webhook_url: Optional[str] = None
 
-# ─── Cache en mémoire pour UUID → domain libvirt (optimisation) ──────────────
+# ─── Cache en mémoire pour UUID → domain libvirt ─────────────────────────────
 _domain_cache: dict = {}
+_domain_cache_ttl: dict = {}
+CACHE_TTL = 3600  # 1 heure
+
+# ─── État de l'évaluateur ────────────────────────────────────────────────────
+_evaluator_last_run: Optional[datetime] = None
+_evaluator_rules_count: int = 0
 
 # ─── PromQL ──────────────────────────────────────────────────────────────────
 
@@ -139,47 +148,72 @@ async def resolve_event(
         raise HTTPException(status_code=404, detail="Event not found")
     return {"status": "resolved"}
 
+
+@router.get("/alerts/evaluator/status")
+async def evaluator_status(profile: schemas.Profile = Depends(deps.get_profile_update_jwt)):
+    """Endpoint pour vérifier que l'évaluateur tourne correctement."""
+    return {
+        "last_run": _evaluator_last_run.isoformat() if _evaluator_last_run else None,
+        "active_rules": _evaluator_rules_count,
+        "status": "running" if _evaluator_last_run else "starting",
+    }
+
 # ─── Évaluateur (background) ─────────────────────────────────────────────────
 
 async def evaluate_alerts():
-    """Tourne toutes les 30s en arrière-plan. Un seul worker exécute ça."""
+    """Tourne toutes les 30s en arrière-plan. Interval fixe sans drift."""
+    global _evaluator_last_run, _evaluator_rules_count
     LOG.info("[AlertEval] Evaluator démarré")
+
     while True:
-        await asyncio.sleep(30)
+        start = asyncio.get_event_loop().time()
         try:
             rules = await alerts_db.list_active_rules()
+            _evaluator_rules_count = len(rules)
+            _evaluator_last_run = datetime.utcnow()
+
             if rules:
                 LOG.info(f"[AlertEval] Cycle: {len(rules)} règle(s) active(s)")
-            for rule in rules:
-                try:
-                    await _evaluate_rule(rule)
-                except Exception as exc:
-                    LOG.error(f"[AlertEval] Erreur règle {rule['id']}: {exc}")
+
+            # Évaluer toutes les règles en parallèle
+            await asyncio.gather(*[
+                _evaluate_rule(rule) for rule in rules
+            ], return_exceptions=True)
+
         except Exception as exc:
             LOG.error(f"[AlertEval] Erreur cycle: {exc}")
 
+        # Interval fixe de 30s peu importe la durée du traitement
+        elapsed = asyncio.get_event_loop().time() - start
+        await asyncio.sleep(max(0, 30 - elapsed))
+
 
 async def _get_libvirt_domain(instance_uuid: str) -> Optional[str]:
-    if instance_uuid in _domain_cache:
-        return _domain_cache[instance_uuid]
-    try:
-        loop = asyncio.get_event_loop()
-        def _fetch():
-            from novaclient import client as nova_client
-            session = client_utils.get_system_session()
-            nova = nova_client.Client(
-                version="2.1",
-                session=session,
-                region_name=CONF.openstack.default_region,
-            )
-            server = nova.servers.get(instance_uuid)
-            return getattr(server, "OS-EXT-SRV-ATTR:instance_name", None)
+    """Résout UUID → domain libvirt avec cache TTL 1h."""
+    now = datetime.utcnow().timestamp()
 
-        domain = await loop.run_in_executor(None, _fetch)
+    # Retourner depuis le cache si valide
+    if instance_uuid in _domain_cache:
+        if now - _domain_cache_ttl.get(instance_uuid, 0) < CACHE_TTL:
+            return _domain_cache[instance_uuid]
+
+    try:
+        session = await generate_session(profile=None)
+        nc = await nova_client(
+            region=CONF.openstack.default_region,
+            session=session,
+            global_request_id="",
+        )
+        server = await run_in_threadpool(nc.servers.get, instance_uuid)
+        domain = getattr(server, "OS-EXT-SRV-ATTR:instance_name", None)
+
         if domain:
             _domain_cache[instance_uuid] = domain
+            _domain_cache_ttl[instance_uuid] = now
             LOG.info(f"[AlertEval] UUID {instance_uuid[:8]}... → {domain}")
+
         return domain
+
     except Exception as exc:
         LOG.error(f"[AlertEval] Nova lookup: {exc}")
         return None
@@ -205,23 +239,23 @@ async def _evaluate_rule(rule: dict):
         await alerts_db.resolve_events_for_rule(rule["id"])
         return
 
-    # Créé l'événement SEULEMENT si aucun autre worker ne l'a déjà fait
     event_data = {
-        "rule_id": rule["id"],
-        "user_id": rule["user_id"],
-        "rule_name": rule["name"],
-        "instance_id": rule["instance_id"],
+        "rule_id":       rule["id"],
+        "user_id":       rule["user_id"],
+        "rule_name":     rule["name"],
+        "instance_id":   rule["instance_id"],
         "instance_name": rule["instance_name"],
-        "metric": rule["metric"],
-        "value": round(value, 2),
-        "threshold": rule["threshold"],
+        "metric":        rule["metric"],
+        "value":         round(value, 2),
+        "threshold":     rule["threshold"],
     }
+
     event_id = await alerts_db.create_event_if_no_firing(event_data)
     if event_id is None:
-        # Un autre worker a déjà créé l'alerte → on ne duplique pas, pas de notif
+        # Un autre worker a déjà créé l'alerte → pas de doublon
         return
 
-    LOG.warning(f"[AlertEval] 🚨 ALERTE: {rule['name']} → valeur={value} seuil={rule['threshold']}")
+    LOG.warning(f"[AlertEval] ALERTE: {rule['name']} → valeur={value} seuil={rule['threshold']}")
     await _send_notifications(rule, event_data)
 
 
@@ -251,14 +285,23 @@ async def _query_prometheus(query: str) -> Optional[float]:
 async def _send_notifications(rule: dict, event: dict):
     label = METRIC_LABELS.get(rule["metric"], rule["metric"])
     op = ">" if rule["operator"] == "gt" else "<"
-    msg = f"Alerte: {rule['name']}\nVM: {rule['instance_name']}\n{label} {op} {rule['threshold']} — valeur: {event['value']}"
+    msg = (
+        f"Alerte: {rule['name']}\n"
+        f"VM: {rule['instance_name']}\n"
+        f"{label} {op} {rule['threshold']} — valeur: {event['value']}"
+    )
 
+    tasks = []
     if rule["notify_email"] and rule.get("email_address"):
-        await _send_email(rule["email_address"], f"[Skyline] {rule['name']}", msg)
+        tasks.append(_send_email(rule["email_address"], f"[Skyline] {rule['name']}", msg))
     if rule["notify_webhook"] and rule.get("webhook_url"):
-        await _send_webhook(rule["webhook_url"], rule, event, msg)
+        tasks.append(_send_webhook(rule["webhook_url"], rule, event, msg))
+
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
+# ─── SMTP ─────────────────────────────────────────────────────────────────────
 
 _SMTP_CONFIG_CACHE = None
 
@@ -290,7 +333,11 @@ def _load_smtp_config():
                 return _SMTP_CONFIG_CACHE
 
     LOG.warning("[SMTP] No skyline.yaml found, using defaults")
-    _SMTP_CONFIG_CACHE = {"host": "localhost", "port": 25, "user": None, "password": None, "from": "skyline-alerts@openstack.local"}
+    _SMTP_CONFIG_CACHE = {
+        "host": "localhost", "port": 25,
+        "user": None, "password": None,
+        "from": "skyline-alerts@openstack.local",
+    }
     return _SMTP_CONFIG_CACHE
 
 
@@ -301,8 +348,8 @@ async def _send_email(to: str, subject: str, body: str):
 
         msg = MIMEText(body, "plain", "utf-8")
         msg["Subject"] = subject
-        msg["From"] = cfg["from"]
-        msg["To"] = to
+        msg["From"]    = cfg["from"]
+        msg["To"]      = to
 
         def _send():
             with smtplib.SMTP(cfg["host"], cfg["port"], timeout=10) as s:
@@ -314,24 +361,27 @@ async def _send_email(to: str, subject: str, body: str):
                     s.login(cfg["user"], cfg["password"])
                 s.sendmail(cfg["from"], [to], msg.as_string())
 
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, _send)
-        LOG.info(f"[Email] ✓ Envoyé à {to}")
+        await asyncio.get_event_loop().run_in_executor(None, _send)
+        LOG.info(f"[Email] Envoyé à {to}")
+
     except Exception as exc:
-        LOG.error(f"[Email] ✗ {type(exc).__name__}: {exc}")
+        LOG.error(f"[Email] {type(exc).__name__}: {exc}")
 
 
 async def _send_webhook(url: str, rule: dict, event: dict, text: str):
     payload = {
         "text": text,
         "alert": {
-            "rule": rule["name"], "instance": rule["instance_name"],
-            "metric": rule["metric"], "value": event["value"],
+            "rule":      rule["name"],
+            "instance":  rule["instance_name"],
+            "metric":    rule["metric"],
+            "value":     event["value"],
             "threshold": rule["threshold"],
         },
     }
     try:
         async with httpx.AsyncClient(timeout=5) as client:
             await client.post(url, json=payload)
+        LOG.info(f"[Webhook] Envoyé à {url}")
     except Exception as exc:
-        LOG.error(f"[Webhook] {exc}")
+        LOG.error(f"[Webhook] {type(exc).__name__}: {exc}")
