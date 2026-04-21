@@ -2,7 +2,7 @@ FROM quay.io/openstack.kolla/skyline-apiserver:2024.2-ubuntu-noble
 USER root
 RUN mkdir -p /var/log/kolla/skyline /etc/skyline
 RUN python3 -m venv /opt/crewai-venv && \
-    /opt/crewai-venv/bin/pip install crewai langchain-groq openstacksdk litellm --quiet
+    /opt/crewai-venv/bin/pip install --no-cache-dir --retries 5 --timeout 60 crewai langchain-groq openstacksdk litellm --quiet && find /opt/crewai-venv -name "*.pyc" -delete 2>/dev/null || true
 COPY skyline_apiserver/api/v1/instance_monitoring.py \
      /var/lib/kolla/venv/lib/python3.12/site-packages/skyline_apiserver/api/v1/instance_monitoring.py
 COPY skyline_apiserver/api/v1/__init__.py \
