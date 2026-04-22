@@ -240,34 +240,7 @@ async def _get_libvirt_domain(instance_uuid: str) -> Optional[str]:
 
     except Exception as exc:
         LOG.error(f"[AlertEval] Nova lookup: {exc}")
-        return None    """Résout UUID → domain libvirt avec cache TTL 1h."""
-    now = datetime.utcnow().timestamp()
-
-    # Retourner depuis le cache si valide
-    if instance_uuid in _domain_cache:
-        if now - _domain_cache_ttl.get(instance_uuid, 0) < CACHE_TTL:
-            return _domain_cache[instance_uuid]
-
-    try:
-        session = await generate_session(profile=None)
-        nc = await nova_client(
-            region=CONF.openstack.default_region,
-            session=session,
-            global_request_id="",
-        )
-        server = await run_in_threadpool(nc.servers.get, instance_uuid)
-        domain = getattr(server, "OS-EXT-SRV-ATTR:instance_name", None)
-
-        if domain:
-            _domain_cache[instance_uuid] = domain
-            _domain_cache_ttl[instance_uuid] = now
-            LOG.info(f"[AlertEval] UUID {instance_uuid[:8]}... → {domain}")
-
-        return domain
-
-    except Exception as exc:
-        LOG.error(f"[AlertEval] Nova lookup: {exc}")
-        return None
+        return None  
 
 
 async def _evaluate_rule(rule: dict):
