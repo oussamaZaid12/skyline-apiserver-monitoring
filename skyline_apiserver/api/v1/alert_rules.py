@@ -189,7 +189,58 @@ async def evaluate_alerts():
 
 
 async def _get_libvirt_domain(instance_uuid: str) -> Optional[str]:
-    """Résout UUID → domain libvirt avec cache TTL 1h."""
+    now = datetime.utcnow().timestamp()
+    if instance_uuid in _domain_cache:
+        if now - _domain_cache_ttl.get(instance_uuid, 0) < CACHE_TTL:
+            return _domain_cache[instance_uuid]
+    try:
+        async with httpx.AsyncClient(timeout=10, verify=False) as client:
+            # 1. Obtenir un token admin
+            token_resp = await client.post(
+                "http://197.5.133.85:5000/v3/auth/tokens",
+                json={
+                    "auth": {
+                        "identity": {
+                            "methods": ["password"],
+                            "password": {
+                                "user": {
+                                    "name": CONF.openstack.system_user_name,
+                                    "domain": {"name": CONF.openstack.system_user_domain},
+                                    "password": CONF.openstack.system_user_password,
+                                }
+                            }
+                        },
+                        "scope": {
+                            "project": {
+                                "name": CONF.openstack.system_project,
+                                "domain": {"name": CONF.openstack.system_project_domain}
+                            }
+                        }
+                    }
+                }
+            )
+            token = token_resp.headers.get("X-Subject-Token")
+            if not token:
+                LOG.error("[AlertEval] Impossible d'obtenir un token Keystone")
+                return None
+
+            # 2. Récupérer le domain libvirt via Nova
+            nova_resp = await client.get(
+                f"http://197.5.133.85:8774/v2.1/servers/{instance_uuid}",
+                headers={"X-Auth-Token": token},
+            )
+            server = nova_resp.json().get("server", {})
+            domain = server.get("OS-EXT-SRV-ATTR:instance_name")
+
+            if domain:
+                _domain_cache[instance_uuid] = domain
+                _domain_cache_ttl[instance_uuid] = now
+                LOG.info(f"[AlertEval] UUID {instance_uuid[:8]}... → {domain}")
+            return domain
+
+    except Exception as exc:
+        LOG.error(f"[AlertEval] Nova lookup: {exc}")
+        return None    """Résout UUID → domain libvirt avec cache TTL 1h."""
     now = datetime.utcnow().timestamp()
 
     # Retourner depuis le cache si valide
