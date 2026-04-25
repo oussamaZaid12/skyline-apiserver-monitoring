@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import JSON, Column, Integer, MetaData, String, Table
+from sqlalchemy import JSON, Column, Integer, MetaData, String, Table, Boolean, DateTime, Float, ForeignKey, Text
 
 METADATA = MetaData()
 
@@ -31,4 +31,41 @@ Settings = Table(
     METADATA,
     Column("key", String(length=128), nullable=False, index=True, unique=True),
     Column("value", JSON, nullable=True),
+)
+AlertRules = Table(
+    "alert_rules",
+    METADATA,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("user_id", String(length=128), nullable=False, index=True),
+    Column("name", String(length=255), nullable=False),
+    Column("instance_id", String(length=64), nullable=False),
+    Column("instance_name", String(length=255), nullable=False),
+    Column("metric", String(length=32), nullable=False),
+    Column("operator", String(length=4), nullable=False),
+    Column("threshold", Float, nullable=False),
+    Column("duration_seconds", Integer, nullable=False, default=60),
+    Column("notify_ui", Boolean, nullable=False, default=True),
+    Column("notify_email", Boolean, nullable=False, default=False),
+    Column("email_address", String(length=255), nullable=True),
+    Column("notify_webhook", Boolean, nullable=False, default=False),
+    Column("webhook_url", Text, nullable=True),
+    Column("is_active", Boolean, nullable=False, default=True),
+    Column("created_at", DateTime, nullable=False),
+)
+
+AlertEvents = Table(
+    "alert_events",
+    METADATA,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("rule_id", Integer, ForeignKey("alert_rules.id", ondelete="CASCADE"), nullable=False, index=True),
+    Column("user_id", String(length=128), nullable=False, index=True),
+    Column("rule_name", String(length=255), nullable=False),
+    Column("instance_id", String(length=64), nullable=False),
+    Column("instance_name", String(length=255), nullable=False),
+    Column("metric", String(length=32), nullable=False),
+    Column("value", Float, nullable=False),
+    Column("threshold", Float, nullable=False),
+    Column("triggered_at", DateTime, nullable=False),
+    Column("resolved_at", DateTime, nullable=True),
+    Column("is_resolved", Boolean, nullable=False, default=False),
 )

@@ -11,7 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 from fastapi import APIRouter
 from skyline_apiserver.api.v1 import (
     contrib,
@@ -24,6 +23,8 @@ from skyline_apiserver.api.v1 import (
     vm_ranking,
     instance_history,
     ai_agent,
+    alert_rules,
+    instance_stream,
 )
 api_router = APIRouter()
 api_router.include_router(login.router, tags=["Login"])
@@ -36,3 +37,5 @@ api_router.include_router(instance_monitoring.router, tags=["Instance Monitoring
 api_router.include_router(vm_ranking.router, tags=["VM Ranking"])
 api_router.include_router(instance_history.router, tags=["Instance History"])
 api_router.include_router(ai_agent.router, tags=["AI Agent"])
+api_router.include_router(alert_rules.router, tags=["Alerts"])
+api_router.include_router(instance_stream.router, tags=["Instance Stream"])
