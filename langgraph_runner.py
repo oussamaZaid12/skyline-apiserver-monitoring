@@ -61,7 +61,7 @@ def sanitize(text: str) -> str:
 
 
 def _load_skyline_cfg() -> dict:
-    with open("/etc/skyline/skyline.yaml") as f:
+    with open("/etc/kolla/skyline-apiserver/skyline.yaml") as f:
         return yaml.safe_load(f)
 
 
@@ -116,23 +116,18 @@ def get_os_connection():
     token = _SESSION.get("keystone_token")
     project_id = _SESSION.get("project_id")
 
-    if token and project_id:
-        return openstack.connect(
-            auth_type="token",
-            auth={
-                "auth_url": os_cfg["keystone_url"],
-                "token": token,
-                "project_id": project_id,
-            },
+    if not token or not project_id:
+        raise ValueError(
+            "Token Keystone manquant. Connectez-vous à Skyline d'abord."
         )
-    # Fallback admin système
+
     return openstack.connect(
-        auth_url=os_cfg["keystone_url"],
-        username=os_cfg["system_user_name"],
-        password=os_cfg["system_user_password"],
-        project_name="admin",
-        user_domain_name=os_cfg["system_user_domain"],
-        project_domain_name=os_cfg["system_project_domain"],
+        auth_type="token",
+        auth={
+            "auth_url": os_cfg["keystone_url"],
+            "token": token,
+            "project_id": project_id,
+        },
     )
 
 
