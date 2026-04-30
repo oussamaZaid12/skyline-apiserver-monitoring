@@ -177,24 +177,19 @@ async def chat(req: ChatRequest):
 
 @app.post("/chat/stream")
 async def chat_stream(req: ChatRequest):
-    """
-    Retourne une réponse SSE.
-    Format événements :
-      data: {"chunk": "...", "done": false}
-      data: {"chunk": "", "done": true, "conversation_id": "..."}
-    """
     if not GROQ_API_KEY:
         raise HTTPException(503, "GROQ_API_KEY non configuré")
 
     async def event_generator() -> AsyncGenerator[str, None]:
         t0 = time.perf_counter()
+        accumulated = ""
         try:
+            # On appelle run_agent en mode NON-stream dans un executor
+            # puis on simule le streaming chunk par chunk
             import asyncio
             loop = asyncio.get_running_loop()
 
-            # run_agent(stream=True) retourne un generator synchrone
-            # On l'enroule dans un executor pour ne pas bloquer la boucle async
-            gen = await loop.run_in_executor(
+            response = await loop.run_in_executor(
                 None,
                 lambda: run_agent(
                     message=req.message,
@@ -203,21 +198,23 @@ async def chat_stream(req: ChatRequest):
                     project_id=req.project_id,
                     conversation_id=req.conversation_id,
                     groq_api_key=GROQ_API_KEY,
-                    stream=True,
+                    stream=False,  # mode simple, plus fiable
                 ),
             )
 
-            # Itère le generator synchrone et yield les chunks SSE
-            for chunk in gen:
-                if chunk:
-                    payload = json_encode({"chunk": chunk, "done": False})
-                    yield f"data: {payload}\n\n"
+            # Découpe la réponse en chunks de 4 mots pour simuler le stream
+            words = response.split(" ")
+            for i in range(0, len(words), 4):
+                chunk = " ".join(words[i:i+4]) + " "
+                accumulated += chunk
+                payload = json_encode({"chunk": chunk, "done": False})
+                yield f"data: {payload}\n\n"
+                await asyncio.sleep(0.05)  # rythme naturel
 
             elapsed = (time.perf_counter() - t0) * 1000
             _record(True, elapsed, stream=True)
             log.info("stream ok conv=%s ms=%.0f", req.conversation_id[:8], elapsed)
 
-            # Événement de fin
             payload = json_encode({
                 "chunk": "",
                 "done": True,
@@ -241,7 +238,7 @@ async def chat_stream(req: ChatRequest):
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",   # désactive le buffering nginx
+            "X-Accel-Buffering": "no",
         },
     )
 
