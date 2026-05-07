@@ -21,6 +21,7 @@ from pydantic import BaseModel
 from skyline_apiserver import schemas
 from skyline_apiserver.api import deps
 from fastapi.param_functions import Depends
+from fastapi.responses import StreamingResponse, JSONResponse, Response
 
 router = APIRouter()
 log = logging.getLogger("skyline.ai_agent")
@@ -107,41 +108,51 @@ async def ai_agent_chat(
 # ─────────────────────────────────────────────────────────────────────────────
 
 @router.post("/ai-agent/chat/stream")
+@router.post("/ai-agent/chat/stream")
 async def ai_agent_chat_stream(
     request: ChatRequest,
     profile: schemas.Profile = Depends(deps.get_profile_update_jwt),
 ):
     """
-    Proxy SSE : Skyline reçoit les chunks depuis agent_service
-    et les retransmet au frontend React.
+    Retourne la réponse complète formatée en SSE.
+    Le frontend reçoit un seul événement 'done' avec tout le texte.
+    Le streaming mot-par-mot est géré côté AiAgent.jsx (simulation).
     """
     conv_id = _conversation_id(profile)
     payload = _build_payload(request, profile, conv_id)
 
-    async def event_proxy():
-        try:
-            async with httpx.AsyncClient(timeout=STREAM_TIMEOUT) as client:
-                async with client.stream(
-                    "POST", f"{AGENT_BASE}/chat/stream", json=payload
-                ) as resp:
-                    resp.raise_for_status()
-                    async for line in resp.aiter_lines():
-                        if line.startswith("data:"):
-                            yield f"{line}\n\n"
-        except httpx.ConnectError:
-            import json
-            err = json.dumps({"chunk": "Service agent indisponible.", "done": True, "error": True})
-            yield f"data: {err}\n\n"
-        except Exception as exc:
-            import json
-            err = json.dumps({"chunk": f"Erreur: {str(exc)[:200]}", "done": True, "error": True})
-            yield f"data: {err}\n\n"
+    try:
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+            resp = await client.post(f"{AGENT_BASE}/chat", json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+            response_text = data.get("response", "Pas de réponse.")
 
-    return StreamingResponse(
-        event_proxy(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-        },
-    )
+        import json
+        # Un seul événement SSE avec la réponse complète
+        event = json.dumps({
+            "chunk": response_text,
+            "done": True,
+            "conversation_id": conv_id,
+        }, ensure_ascii=False)
+
+        return Response(
+            content=f"data: {event}\n\n",
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    except Exception as exc:
+        import json
+        event = json.dumps({
+            "chunk": f"Erreur: {str(exc)[:200]}",
+            "done": True,
+            "error": True,
+        })
+        return Response(
+            content=f"data: {event}\n\n",
+            media_type="text/event-stream",
+        )

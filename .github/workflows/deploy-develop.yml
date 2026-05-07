@@ -45,3 +45,6 @@ jobs:
             -v /etc/kolla/skyline-apiserver/skyline.yaml:/var/lib/kolla/config_files/skyline.yaml \
             -v /etc/kolla/skyline-apiserver/gunicorn-dev.py:/var/lib/kolla/config_files/gunicorn.py \
             skyline-apiserver-monitoring:develop kolla_start
+            sudo docker cp skyline_apiserver_dev:/opt/langgraph_runner.py /opt/
+            sudo docker cp skyline_apiserver_dev:/opt/agent_service.py /opt/
+            sudo systemctl restart aiops-agent    

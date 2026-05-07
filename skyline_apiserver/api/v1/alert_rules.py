@@ -197,7 +197,7 @@ async def _get_libvirt_domain(instance_uuid: str) -> Optional[str]:
         async with httpx.AsyncClient(timeout=10, verify=False) as client:
             # 1. Obtenir un token admin
             token_resp = await client.post(
-                "http://197.5.133.85:5000/v3/auth/tokens",
+                "http://197.5.133.150:5000/v3/auth/tokens",
                 json={
                     "auth": {
                         "identity": {
@@ -226,7 +226,7 @@ async def _get_libvirt_domain(instance_uuid: str) -> Optional[str]:
 
             # 2. Récupérer le domain libvirt via Nova
             nova_resp = await client.get(
-                f"http://197.5.133.85:8774/v2.1/servers/{instance_uuid}",
+                f"http://197.5.133.150:8774/v2.1/servers/{instance_uuid}",
                 headers={"X-Auth-Token": token},
             )
             server = nova_resp.json().get("server", {})
